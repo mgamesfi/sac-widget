@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SAC Doc Generator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Gerador de Documentação &amp; Avaliação — SAP Analytics Cloud</h1>
+    <p class="subtitle">
+      Conecte-se a um tenant SAC (ou use o modo demo) para gerar documentação dos modelos de
+      dados com avaliação de boas práticas.
+    </p>
+  </header>
+
+  <main>
+    <section id="connection-form">
+      <form id="analyze-form">
+        <div class="mode-toggle">
+          <label><input type="radio" name="mode" value="demo" checked /> Modo demo (dados de exemplo)</label>
+          <label><input type="radio" name="mode" value="live" /> Conectar a um tenant real</label>
+        </div>
+
+        <div id="live-fields" class="live-fields" hidden>
+          <label>
+            URL base do tenant
+            <input type="url" name="tenantBaseUrl" placeholder="https://meutenant.eu10.sapanalytics.cloud" />
+          </label>
+          <label>
+            Token URL (OAuth2)
+            <input type="url" name="tokenUrl" placeholder="https://meutenant.authentication.eu10.hana.ondemand.com/oauth/token" />
+          </label>
+          <label>
+            Client ID
+            <input type="text" name="clientId" autocomplete="off" />
+          </label>
+          <label>
+            Client Secret
+            <input type="password" name="clientSecret" autocomplete="off" />
+          </label>
+          <p class="hint">
+            Gere as credenciais em Administration &gt; App Integration &gt; OAuth Clients no seu tenant SAC.
+            As credenciais são usadas apenas para esta requisição e não são armazenadas.
+          </p>
+        </div>
+
+        <button type="submit" id="analyze-btn">Gerar documentação</button>
+      </form>
+      <p id="status" role="status"></p>
+    </section>
+
+    <section id="report" hidden>
+      <div class="report-toolbar">
+        <button id="download-md">Baixar Markdown</button>
+      </div>
+      <div id="report-content"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
