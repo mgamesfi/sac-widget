@@ -1,0 +1,36 @@
+[
+  {
+    "id": "SalesPlanning_Model",
+    "name": "Sales Planning Model",
+    "description": "",
+    "type": "Planning",
+    "dimensions": [
+      { "id": "Version", "name": "Version", "description": "Planning version", "isPublic": true, "hasHierarchy": false, "hierarchyCount": 0, "memberCount": 4 },
+      { "id": "Date", "name": "Date", "description": "Fiscal calendar", "isPublic": true, "hasHierarchy": true, "hierarchyCount": 1, "memberCount": 1826 },
+      { "id": "Region", "name": "Region", "description": "", "isPublic": false, "hasHierarchy": false, "hierarchyCount": 0, "memberCount": 42 },
+      { "id": "Dimension_1", "name": "Dimension_1", "description": "", "isPublic": false, "hasHierarchy": false, "hierarchyCount": 0, "memberCount": 3 },
+      { "id": "CostCenter", "name": "Cost Center", "description": "", "isPublic": false, "hasHierarchy": false, "hierarchyCount": 0, "memberCount": 315 },
+      { "id": "Product", "name": "Product", "description": "Product master", "isPublic": true, "hasHierarchy": true, "hierarchyCount": 2, "memberCount": 5400 }
+    ],
+    "measures": [
+      { "id": "Revenue", "name": "Revenue", "description": "Gross revenue", "dataType": "Decimal", "unitType": "Currency", "currencyConversion": null },
+      { "id": "Units", "name": "Units", "description": "Units sold", "dataType": "Decimal", "unitType": null, "currencyConversion": null },
+      { "id": "Measure_2", "name": "Measure_2", "description": "", "dataType": "Decimal", "unitType": "Currency", "currencyConversion": null }
+    ]
+  },
+  {
+    "id": "FinancialConsolidation_Model",
+    "name": "Financial Consolidation",
+    "description": "Group consolidation model for statutory reporting",
+    "type": "Analytic",
+    "dimensions": [
+      { "id": "Version", "name": "Version", "description": "Actual/Budget/Forecast", "isPublic": true, "hasHierarchy": false, "hierarchyCount": 0, "memberCount": 6 },
+      { "id": "Entity", "name": "Legal Entity", "description": "Consolidation entity", "isPublic": true, "hasHierarchy": true, "hierarchyCount": 1, "memberCount": 120 },
+      { "id": "Account", "name": "Account", "description": "Chart of accounts", "isPublic": true, "hasHierarchy": true, "hierarchyCount": 3, "memberCount": 2100 },
+      { "id": "Currency", "name": "Currency", "description": "Transaction currency", "isPublic": true, "hasHierarchy": false, "hierarchyCount": 0, "memberCount": 25 }
+    ],
+    "measures": [
+      { "id": "Amount", "name": "Amount", "description": "Signed amount in transaction currency", "dataType": "Decimal", "unitType": "Currency", "currencyConversion": "Corporate" }
+    ]
+  }
+]
