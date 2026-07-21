@@ -63,8 +63,16 @@ def render_object_page(obj: UnifiedObject, graph: nx.DiGraph, objects_by_id: dic
     else:
         fontes_ids, destinos_ids = obj.fontes, obj.destinos
         mermaid = "flowchart LR\n"
+
+    obj_dump = obj.model_dump(mode="json")
+    atributos = dict(obj_dump["atributos_especificos"])
+    campos = atributos.pop("campos", None)
+    atributos.pop("hana_view", None)  # já refletido em 'campos'; dict aninhado renderiza mal na tabela
+    obj_dump["atributos_especificos"] = atributos
+
     return template.render(
-        obj=obj.model_dump(mode="json"),
+        obj=obj_dump,
+        campos=campos,
         fontes=_link_list(fontes_ids, objects_by_id),
         destinos=_link_list(destinos_ids, objects_by_id),
         mermaid=mermaid,

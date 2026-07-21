@@ -24,6 +24,16 @@ _Nenhuma fonte identificada — possível objeto órfão (sem fonte)._
 _Nenhum consumidor identificado — possível objeto órfão (sem consumidor)._
 {% endif %}
 
+{% if campos %}
+## Campos
+
+| Nome | Tipo de dado (origem) | Comprimento | Chave |
+|---|---|---|---|
+{% for campo in campos -%}
+| {{ campo.nome }} | {{ campo.tipo_dado or "?" }} | {{ campo.comprimento if campo.comprimento is not none else "?" }} | {{ "sim" if campo.chave else "" }} |
+{% endfor %}
+{% endif %}
+
 {% if obj.atributos_especificos %}
 ## Atributos específicos
 

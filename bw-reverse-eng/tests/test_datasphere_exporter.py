@@ -85,6 +85,49 @@ def test_build_scaffold_includes_honest_warnings():
     assert "não é um CSN oficial" in warnings_text or "rascunho" in warnings_text
 
 
+def test_build_scaffold_populates_elements_from_campos():
+    dso = _obj(
+        ObjectType.DSO, "ZDSO1",
+        atributos={"campos": [
+            {"nome": "0MATERIAL", "tipo_dado": "CHAR", "comprimento": 18, "chave": True},
+            {"nome": "0AMOUNT", "tipo_dado": "CURR", "comprimento": 15, "chave": False},
+        ]},
+    )
+    graph = build_graph([dso])
+    scaffold = build_scaffold([dso], graph)
+
+    entity = scaffold["entidades"][0]
+    assert entity["csn_stub"]["elements"]["0MATERIAL"] == {
+        "tipo_dado_origem": "CHAR", "comprimento": 18, "key": True,
+    }
+    assert entity["csn_stub"]["elements"]["0AMOUNT"] == {
+        "tipo_dado_origem": "CURR", "comprimento": 15,
+    }
+    assert "tipos CDS do Datasphere" in entity["pendencias"][0]
+
+
+def test_build_scaffold_populates_single_element_for_infoobject_own_datatype():
+    iobj = _obj(
+        ObjectType.INFO_OBJECT, "0MATERIAL",
+        atributos={"tipo_dado": "CHAR", "comprimento": 18},
+    )
+    graph = build_graph([iobj])
+    scaffold = build_scaffold([iobj], graph)
+
+    entity = scaffold["entidades"][0]
+    assert entity["csn_stub"]["elements"] == {"0MATERIAL": {"tipo_dado_origem": "CHAR", "comprimento": 18}}
+
+
+def test_global_warnings_reflect_partial_schema_coverage():
+    with_schema = _obj(ObjectType.DSO, "ZDSO1", atributos={"campos": [{"nome": "X", "tipo_dado": "CHAR"}]})
+    without_schema = _obj(ObjectType.INFO_CUBE, "ZSALES")
+    graph = build_graph([with_schema, without_schema])
+    scaffold = build_scaffold([with_schema, without_schema], graph)
+
+    warnings_text = " ".join(scaffold["avisos"])
+    assert "1 de 2 entidades" in warnings_text
+
+
 def test_export_scaffold_writes_valid_json(tmp_path):
     objects = _sample_objects()
     graph = build_graph(objects)

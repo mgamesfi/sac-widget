@@ -5,6 +5,10 @@ from extractor.filters import ExtractionFilters
 def test_extract_infocubes_joins_text_table(fake_connection_factory):
     conn = fake_connection_factory(
         [
+            # RSDCUBEIOBJ antes de RSDCUBE: "RSDCUBE" é prefixo de "RSDCUBEIOBJ".
+            ("FROM RSDCUBEIOBJ", []),
+            ("FROM RSDCHA", []),
+            ("FROM RSDKYF", []),
             ("FROM RSDCUBE", [
                 {"INFOCUBE": "ZSALES", "CUBETYPE": "0", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Vendas"},
             ]),
@@ -12,7 +16,7 @@ def test_extract_infocubes_joins_text_table(fake_connection_factory):
     )
     rows = classic_layer.extract_infocubes(conn, ExtractionFilters())
     assert rows == [
-        {"INFOCUBE": "ZSALES", "CUBETYPE": "0", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Vendas"}
+        {"INFOCUBE": "ZSALES", "CUBETYPE": "0", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Vendas", "CAMPOS": []}
     ]
 
 

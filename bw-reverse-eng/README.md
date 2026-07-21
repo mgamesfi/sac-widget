@@ -78,8 +78,34 @@ objeto correspondente é apenas reportado vazio no log, e tabelas de texto
 
 A documentação gerada fica em `docs/index.md` (índice geral + visão macro de
 lineage), `docs/objects/<id>.md` (uma página por objeto, com diagrama de
-contexto imediato) e `docs/reports.md` (sumário, objetos sem documentação e
-complexidade).
+contexto imediato e, quando disponível, a tabela de **Campos**) e
+`docs/reports.md` (sumário, objetos sem documentação e complexidade).
+
+### Estrutura/schema (campos, tipos, chaves)
+
+Além do inventário e do lineage, a extração também traz o schema de campos de
+cada objeto quando as tabelas correspondentes estão disponíveis:
+
+| Tipo de objeto | Fonte do schema |
+|---|---|
+| InfoObject | `RSDCHA` (características) / `RSDKYF` (key figures) — tipo de dado, comprimento, moeda/unidade |
+| InfoCube / MultiProvider | `RSDCUBEIOBJ` (características + key figures atribuídos) + tipo de dado via RSDCHA/RSDKYF |
+| DSO standard | `RSDODSOIOBJ` — campos e marcação de chave (`FIELDTYPE = 'KEY'`) |
+| ADSO | Catálogo HANA (`SYS.TABLE_COLUMNS`), **melhor esforço**: assume que o nome da tabela ativa é igual ao nome técnico do ADSO — pode não bater dependendo da versão/Support Package |
+| CompositeProvider / Open ODS View | Catálogo HANA (`SYS.TABLE_COLUMNS`) sobre a Calculation View / tabela de origem — fonte confiável, já que esses objetos são fisicamente HANA |
+
+O schema fica em `atributos_especificos.campos` (lista de `{nome, tipo_dado,
+comprimento, chave}`) no modelo unificado, e é exibido na página de cada
+objeto. Os tipos de dado ficam no **vocabulário de origem** (BW: `CHAR`/`DEC`/
+`CURR`; HANA: `NVARCHAR`/`DECIMAL`) — não há tradução automática para os tipos
+CDS do Datasphere.
+
+Aviso: ao contrário de `RSDIOBJ`/`RSDCUBE`/`RSTRAN` (citadas na seção 3.1 da
+especificação), as tabelas `RSDCHA`/`RSDKYF`/`RSDCUBEIOBJ`/`RSDODSOIOBJ` são
+menos universalmente documentadas — valide os nomes contra o sandbox do
+cliente. Se divergirem, a extração principal do objeto não é afetada (mesmo
+padrão tolerante usado em todo o app): o objeto é extraído normalmente, só sem
+`campos`.
 
 ### Scaffold para SAP Datasphere (arquitetura medalhão Bronze/Prata/Ouro)
 
@@ -97,14 +123,21 @@ sugeridos (`BW_BRONZE`/`BW_SILVER`/`BW_GOLD`) e os fluxos de transformação
 entre elas.
 
 **Leia isto antes de usar**: o JSON gerado **não é um CSN oficial pronto para
-importar** e **não reproduz o resultado do BW automaticamente**. Faltam duas
-coisas que este app não extrai hoje:
-1. **Schema de campos** de cada objeto (nome/tipo/chave) — por isso todo
-   `csn_stub.elements` sai vazio.
+importar** e **não reproduz o resultado do BW automaticamente**, mesmo agora
+que o schema de campos é extraído (seção anterior). Duas ressalvas continuam
+valendo:
+1. Os tipos de dado em `csn_stub.elements[*].tipo_dado_origem` estão no
+   **vocabulário de origem** (BW/HANA), não nos tipos CDS do Datasphere —
+   precisam de mapeamento manual (`avisos` e a `pendencia` de cada entidade
+   deixam isso explícito). Quando o schema não foi resolvido para um objeto
+   (tabela ausente, ADSO sem correspondência no catálogo HANA etc.),
+   `elements` fica vazio e a pendência pede para completar manualmente.
 2. **Lógica de negócio das regras de transformação** (mapeamentos, rotinas,
-   fórmulas) — as regras complexas do BW costumam ficar serializadas e só
-   seriam recuperáveis via RFC/BAPI (`RSTRAN_*`), camada não implementada
-   nesta versão (ver seção 3.3 da especificação e `Fora do escopo` abaixo).
+   fórmulas) continua fora do escopo — as regras complexas do BW costumam
+   ficar serializadas e só seriam recuperáveis via RFC/BAPI (`RSTRAN_*`),
+   camada não implementada nesta versão (ver seção 3.3 da especificação e
+   `Fora do escopo` abaixo). Cada fluxo em `fluxos` só traz a contagem de
+   regras e origem/destino, não a lógica em si.
 
 Trate o arquivo gerado como um **rascunho de arquitetura-alvo** para acelerar
 o redesenho manual no Data Builder — o próprio JSON lista essas limitações em
@@ -135,7 +168,7 @@ nomes de tabela/coluna — valide as queries de `extractor/classic_layer.py` e
 | Requisito | Onde |
 |---|---|
 | RF01 Conexão e autenticação | `config/settings.py`, `extractor/connection.py` (HANA), `extractor/csv_source.py` (CSV) |
-| RF02 Extração de metadados | `extractor/classic_layer.py`, `extractor/nextgen_layer.py`, `extractor/export.py` |
+| RF02 Extração de metadados (+ schema de campos) | `extractor/classic_layer.py`, `extractor/nextgen_layer.py`, `extractor/export.py` |
 | RF03 Modelo unificado | `processor/models.py`, `processor/normalizer.py` |
 | RF04 Grafo de lineage | `processor/graph_builder.py` |
 | RF05 Documentação + Mermaid | `docgen/markdown_generator.py`, `docgen/mermaid_generator.py` |
@@ -146,7 +179,8 @@ nomes de tabela/coluna — valide as queries de `extractor/classic_layer.py` e
 
 Alteração de objetos no BW, extração de dados transacionais, automação de
 deploy de transporte e análise de performance de queries (ver seção 1.2).
-Também fora do escopo: extração de schema de campos por objeto e da lógica de
-negócio das regras de transformação (exigiria camada RFC/BAPI, não
-implementada) — por isso o `export-datasphere` gera um rascunho, não uma
-migração automática pronta para carregar.
+Também fora do escopo: a lógica de negócio das regras de transformação
+(exigiria camada RFC/BAPI, não implementada) e a tradução automática dos
+tipos de dado BW/HANA para os tipos CDS do Datasphere — por isso o
+`export-datasphere` gera um rascunho, não uma migração automática pronta para
+carregar, mesmo com o schema de campos já extraído.

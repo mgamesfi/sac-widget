@@ -58,7 +58,17 @@ def _normalize_infoobjects(rows: list[dict[str, Any]]) -> list[UnifiedObject]:
             r["IOBJNM"],
             r.get("TXTLG", ""),
             r.get("DEVCLASS", ""),
-            {"iobjtp": r.get("IOBJTP"), "last_user": r.get("LASTUSER"), "timestmp": r.get("TIMESTMP")},
+            {
+                "iobjtp": r.get("IOBJTP"),
+                "last_user": r.get("LASTUSER"),
+                "timestmp": r.get("TIMESTMP"),
+                # Um InfoObject É o campo (schema veio de RSDCHA/RSDKYF — ver
+                # extractor.classic_layer._infoobject_datatypes).
+                "tipo_dado": r.get("tipo_dado"),
+                "comprimento": r.get("comprimento"),
+                "moeda": r.get("moeda"),
+                "unidade": r.get("unidade"),
+            },
         )
         for r in rows
     ]
@@ -71,7 +81,11 @@ def _normalize_infocubes(rows: list[dict[str, Any]]) -> list[UnifiedObject]:
             r["INFOCUBE"],
             r.get("TXTLG", ""),
             r.get("DEVCLASS", ""),
-            {"last_user": r.get("LASTUSER"), "timestmp": r.get("TIMESTMP")},
+            {
+                "last_user": r.get("LASTUSER"),
+                "timestmp": r.get("TIMESTMP"),
+                "campos": r.get("CAMPOS", []),
+            },
         )
         for r in rows
     ]
@@ -84,7 +98,11 @@ def _normalize_dsos(rows: list[dict[str, Any]]) -> list[UnifiedObject]:
             r["ODSOBJECT"],
             r.get("TXTLG", ""),
             r.get("DEVCLASS", ""),
-            {"last_user": r.get("LASTUSER"), "timestmp": r.get("TIMESTMP")},
+            {
+                "last_user": r.get("LASTUSER"),
+                "timestmp": r.get("TIMESTMP"),
+                "campos": r.get("CAMPOS", []),
+            },
         )
         for r in rows
     ]
@@ -98,7 +116,11 @@ def _normalize_multiproviders(rows: list[dict[str, Any]]) -> list[UnifiedObject]
             r["INFOCUBE"],
             r.get("TXTLG", ""),
             r.get("DEVCLASS", ""),
-            {"last_user": r.get("LASTUSER"), "timestmp": r.get("TIMESTMP")},
+            {
+                "last_user": r.get("LASTUSER"),
+                "timestmp": r.get("TIMESTMP"),
+                "campos": r.get("CAMPOS", []),
+            },
         )
         obj.fontes = list(r.get("PART_PROVIDERS", []))
         objects.append(obj)
@@ -112,7 +134,11 @@ def _normalize_adsos(rows: list[dict[str, Any]]) -> list[UnifiedObject]:
             r["ADSONM"],
             r.get("TXTLG", ""),
             r.get("DEVCLASS", ""),
-            {"last_user": r.get("LASTUSER"), "timestmp": r.get("TIMESTMP")},
+            {
+                "last_user": r.get("LASTUSER"),
+                "timestmp": r.get("TIMESTMP"),
+                "campos": r.get("CAMPOS", []),
+            },
         )
         for r in rows
     ]
@@ -121,6 +147,7 @@ def _normalize_adsos(rows: list[dict[str, Any]]) -> list[UnifiedObject]:
 def _normalize_composite_providers(rows: list[dict[str, Any]], warnings: list[str]) -> list[UnifiedObject]:
     objects = []
     for r in rows:
+        hana_view = r.get("HANA_VIEW") or {}
         obj = _base_object(
             ObjectType.COMPOSITE_PROVIDER,
             r["COMPPROV"],
@@ -130,7 +157,11 @@ def _normalize_composite_providers(rows: list[dict[str, Any]], warnings: list[st
                 "last_user": r.get("LASTUSER"),
                 "timestmp": r.get("TIMESTMP"),
                 "num_elements": r.get("NUM_ELEMENTS", 0),
-                "hana_view": r.get("HANA_VIEW"),
+                "hana_view": hana_view,
+                # Colunas reais vêm do catálogo HANA (SYS.TABLE_COLUMNS) quando
+                # --hana-schema foi informado na extração — ver
+                # extractor.nextgen_layer.enrich_with_hana_catalog.
+                "campos": hana_view.get("campos", []),
             },
         )
         source_names = []
@@ -149,7 +180,11 @@ def _normalize_open_ods_views(rows: list[dict[str, Any]]) -> list[UnifiedObject]
             r["VIEWNAME"],
             r.get("TXTLG", ""),
             r.get("DEVCLASS", ""),
-            {"source_type": r.get("SOURCETYPE"), "timestmp": r.get("TIMESTMP")},
+            {
+                "source_type": r.get("SOURCETYPE"),
+                "timestmp": r.get("TIMESTMP"),
+                "campos": r.get("CAMPOS", []),
+            },
         )
         if r.get("SOURCE"):
             obj.fontes = [r["SOURCE"]]

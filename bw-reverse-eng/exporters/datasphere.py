@@ -53,9 +53,58 @@ def _suggested_name(layer: MedallionLayer, nome_tecnico: str) -> str:
     return f"{_NAME_PREFIXES[layer]}{slug}"[:60]
 
 
+def _csn_elements(obj: UnifiedObject) -> dict[str, Any]:
+    """Converte o schema extraído (ver `processor.normalizer` / `extractor.classic_layer`
+    `_infoobject_datatypes`/`_infoprovider_fields`/`_dso_fields` e
+    `extractor.nextgen_layer._hana_columns`) em `elements` no formato CSN.
+
+    Os tipos de dado ficam no vocabulário de origem (BW: CHAR/DEC/CURR/...; HANA:
+    NVARCHAR/DECIMAL/...) em `tipo_dado_origem` — não são traduzidos para os tipos
+    CDS do Datasphere (cds.String, cds.Decimal, ...), porque essa tradução depende de
+    decisões de modelagem (precisão, tratamento de moeda/unidade) que não devem ser
+    automatizadas silenciosamente. Ver aviso global em `_global_warnings`.
+    """
+    campos = obj.atributos_especificos.get("campos")
+    if campos:
+        elements: dict[str, Any] = {}
+        for campo in campos:
+            element: dict[str, Any] = {"tipo_dado_origem": campo.get("tipo_dado")}
+            if campo.get("comprimento") is not None:
+                element["comprimento"] = campo["comprimento"]
+            if campo.get("chave"):
+                element["key"] = True
+            elements[campo["nome"]] = element
+        return elements
+
+    # InfoObject: o próprio objeto É o campo (schema em atributos_especificos, não
+    # numa lista "campos" — ver processor.normalizer._normalize_infoobjects).
+    tipo_dado = obj.atributos_especificos.get("tipo_dado")
+    if tipo_dado:
+        element = {"tipo_dado_origem": tipo_dado}
+        if obj.atributos_especificos.get("comprimento") is not None:
+            element["comprimento"] = obj.atributos_especificos["comprimento"]
+        return {obj.nome_tecnico: element}
+
+    return {}
+
+
 def _entity_entry(
     obj: UnifiedObject, layer: MedallionLayer, name_by_id: dict[str, str]
 ) -> dict[str, Any]:
+    elements = _csn_elements(obj)
+    if elements:
+        pendencia = (
+            "Schema extraído automaticamente (tabelas de dicionário BW ou catálogo HANA) — os "
+            "tipos de dado em 'tipo_dado_origem' estão no vocabulário de origem (BW: CHAR/DEC/CURR; "
+            "HANA: NVARCHAR/DECIMAL), não nos tipos CDS do Datasphere; mapeie antes de importar e "
+            "confira as chaves ('key')."
+        )
+    else:
+        pendencia = (
+            "Schema de campos não disponível para este objeto (tabela de metadados não encontrada, "
+            "sem permissão, ou objeto sem esse tipo de detalhamento) — adicione os campos manualmente "
+            "antes de importar no Data Builder."
+        )
     return {
         "id": obj.id,
         "camada_medalhao": layer.value,
@@ -69,12 +118,9 @@ def _entity_entry(
         "destinos_bw": [name_by_id.get(d, d) for d in obj.destinos],
         "csn_stub": {
             "kind": "entity",
-            "elements": {},
+            "elements": elements,
         },
-        "pendencias": [
-            "Adicionar os campos reais (nome, tipo de dado, chave) antes de importar no Data Builder — "
-            "'elements' está vazio porque o schema de campos não foi extraído do BW."
-        ],
+        "pendencias": [pendencia],
     }
 
 
@@ -96,16 +142,43 @@ def _flow_entry(obj: UnifiedObject, name_by_id: dict[str, str]) -> dict[str, Any
     return entry
 
 
-def _global_warnings(classification: MedallionClassification, objects: list[UnifiedObject]) -> list[str]:
+def _global_warnings(
+    classification: MedallionClassification, objects: list[UnifiedObject], entidades: list[dict[str, Any]]
+) -> list[str]:
+    total = len(entidades)
+    with_schema = sum(1 for e in entidades if e["csn_stub"]["elements"])
+
+    if total == 0:
+        schema_warning = "Nenhuma entidade classificada — não há schema de campos a reportar."
+    elif with_schema == total:
+        schema_warning = (
+            "Schema de campos disponível para todas as entidades — mas os tipos de dado estão no "
+            "vocabulário de origem (BW/HANA), não nos tipos CDS do Datasphere; mapeie antes de importar "
+            "(ver 'pendencias' em cada entidade)."
+        )
+    elif with_schema == 0:
+        schema_warning = (
+            "Nenhuma entidade teve schema de campos resolvido — todo 'csn_stub.elements' está vazio. "
+            "Isso costuma indicar que as tabelas RSDCHA/RSDKYF/RSDCUBEIOBJ/RSDODSOIOBJ (ou o catálogo "
+            "HANA, se --hana-schema não foi usado na extração) não estavam disponíveis. Complete "
+            "manualmente antes de importar."
+        )
+    else:
+        schema_warning = (
+            f"Schema de campos resolvido para {with_schema} de {total} entidades — as demais têm "
+            "'csn_stub.elements' vazio (ver 'pendencias' de cada uma) e precisam ser completadas "
+            "manualmente antes de importar."
+        )
+
     warnings = [
         "Classificação Bronze/Prata/Ouro é heurística (tipo de objeto + posição no grafo de lineage "
         "observado) — valide com o time de negócio antes de tratar como arquitetura final.",
-        "Nenhum schema de campos foi extraído do BW — todo 'csn_stub.elements' está vazio; complete "
-        "cada entidade manualmente (ou via SYS.TABLE_COLUMNS/characteristics do BW) antes de importar.",
+        schema_warning,
         "A lógica de negócio das regras de transformação não foi extraída — reveja cada item em "
         "'fluxos' e recrie a lógica manualmente no Datasphere.",
         "Este arquivo é um rascunho de arquitetura-alvo, não um CSN oficial pronto para carregar — "
-        "não é garantido que produza o mesmo resultado do BW sem revisão manual.",
+        "não é garantido que produza o mesmo resultado do BW sem revisão manual, mesmo quando o "
+        "schema de campos está preenchido.",
     ]
     counts = classification.counts()
     if counts["bronze"] == 0:
@@ -145,7 +218,7 @@ def build_scaffold(objects: list[UnifiedObject], graph: nx.DiGraph) -> dict[str,
         "espacos_sugeridos": {k.value: v for k, v in _SUGGESTED_SPACES.items()},
         "entidades": sorted(entidades, key=lambda e: (e["camada_medalhao"], e["nome_tecnico_bw"])),
         "fluxos": sorted(fluxos, key=lambda f: f["nome_tecnico_bw"]),
-        "avisos": _global_warnings(classification, objects),
+        "avisos": _global_warnings(classification, objects, entidades),
     }
 
 

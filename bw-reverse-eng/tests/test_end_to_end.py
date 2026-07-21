@@ -13,12 +13,18 @@ def _script():
     # Ordem importa: entradas mais específicas antes de entradas mais genéricas,
     # já que o FakeConnection casa pela primeira substring encontrada.
     return [
+        ("FROM RSDCHA", []),
+        ("FROM RSDKYF", []),
         ("FROM RSDIOBJ", [
             {"IOBJNM": "0MATERIAL", "IOBJTP": "CHA", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Material"},
         ]),
+        ("FROM RSDCUBEIOBJ", []),
         ("CUBETYPE = '0'", [
             {"INFOCUBE": "ZSALES", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Vendas"},
         ]),
+        # RSDODSOIOBJ antes de RSDODSO: "RSDODSO" é prefixo de "RSDODSOIOBJ" no
+        # FakeConnection (que casa por substring).
+        ("FROM RSDODSOIOBJ", []),
         ("FROM RSDODSO", [
             {"ODSOBJECT": "ZDSO1", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "DSO Vendas"},
         ]),

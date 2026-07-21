@@ -46,6 +46,34 @@ def _run_optional(conn: SqlConnection, label: str, sql: str, params: tuple[Any, 
         return []
 
 
+def _infoobject_datatypes(conn: SqlConnection) -> dict[str, dict[str, Any]]:
+    """Tipo de dado/comprimento por InfoObject, via as tabelas de atributos
+    específicos por tipo (RSDCHA para características, RSDKYF para key figures).
+
+    Aviso: ao contrário de RSDIOBJ/RSDCUBE/RSTRAN (citadas explicitamente na seção
+    3.1 da especificação), RSDCHA/RSDKYF são menos universalmente documentadas —
+    valide contra o sandbox do cliente. Como toda consulta de enriquecimento aqui,
+    se a tabela não existir a extração principal segue normalmente, só sem o
+    schema de campos.
+    """
+    cha_sql = "SELECT IOBJNM, DATATYPE, LENGTH FROM RSDCHA WHERE OBJVERS = ?"
+    kyf_sql = "SELECT IOBJNM, DATATYPE, LENGTH, CURRENCY, UNIT FROM RSDKYF WHERE OBJVERS = ?"
+    cha_rows = _run_optional(conn, "RSDCHA (tipo de dado de características)", cha_sql, (_ACTIVE_VERSION,))
+    kyf_rows = _run_optional(conn, "RSDKYF (tipo de dado de key figures)", kyf_sql, (_ACTIVE_VERSION,))
+
+    by_iobjnm: dict[str, dict[str, Any]] = {}
+    for row in cha_rows:
+        by_iobjnm[row["IOBJNM"]] = {"tipo_dado": row.get("DATATYPE"), "comprimento": row.get("LENGTH")}
+    for row in kyf_rows:
+        by_iobjnm[row["IOBJNM"]] = {
+            "tipo_dado": row.get("DATATYPE"),
+            "comprimento": row.get("LENGTH"),
+            "moeda": row.get("CURRENCY"),
+            "unidade": row.get("UNIT"),
+        }
+    return by_iobjnm
+
+
 def extract_infoobjects(
     conn: SqlConnection, filters: ExtractionFilters, language: str = "EN"
 ) -> list[dict[str, Any]]:
@@ -58,7 +86,38 @@ def extract_infoobjects(
           ON t.IOBJNM = o.IOBJNM AND t.LANGU = ?
         WHERE o.OBJVERS = ?{pkg_clause}{since_clause}
     """
-    return _run(conn, "InfoObjects", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+    rows = _run(conn, "InfoObjects", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+
+    datatypes = _infoobject_datatypes(conn)
+    for row in rows:
+        row.update(datatypes.get(row["IOBJNM"], {}))
+    return rows
+
+
+def _infoprovider_fields(conn: SqlConnection) -> dict[str, list[dict[str, Any]]]:
+    """Campos (características + key figures) atribuídos a cada InfoCube/MultiProvider,
+    via RSDCUBEIOBJ — usada tanto para InfoCubes quanto MultiProviders, já que ambos
+    são linhas de RSDCUBE (CUBETYPE '0'/'1') e a atribuição de campos é keyed por
+    INFOCUBE independente do tipo.
+
+    Aviso: mesma ressalva de `_infoobject_datatypes` — valide o nome exato desta
+    tabela contra o sandbox do cliente; se divergir, a extração principal do
+    InfoCube/MultiProvider segue normalmente, só sem a lista de campos.
+    """
+    sql = "SELECT INFOCUBE, IOBJNM FROM RSDCUBEIOBJ WHERE OBJVERS = ?"
+    rows = _run_optional(conn, "RSDCUBEIOBJ (campos do InfoProvider)", sql, (_ACTIVE_VERSION,))
+    by_provider: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_provider.setdefault(row["INFOCUBE"], []).append({"nome": row["IOBJNM"]})
+    return by_provider
+
+
+def _enrich_fields_with_datatype(
+    fields: list[dict[str, Any]], datatypes: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    for field_ in fields:
+        field_.update(datatypes.get(field_["nome"], {}))
+    return fields
 
 
 def extract_infocubes(
@@ -73,7 +132,26 @@ def extract_infocubes(
           ON t.INFOCUBE = c.INFOCUBE AND t.LANGU = ?
         WHERE c.OBJVERS = ? AND c.CUBETYPE = '0'{pkg_clause}{since_clause}
     """
-    return _run(conn, "InfoCubes", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+    rows = _run(conn, "InfoCubes", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+
+    fields_by_provider = _infoprovider_fields(conn)
+    datatypes = _infoobject_datatypes(conn)
+    for row in rows:
+        row["CAMPOS"] = _enrich_fields_with_datatype(fields_by_provider.get(row["INFOCUBE"], []), datatypes)
+    return rows
+
+
+def _dso_fields(conn: SqlConnection) -> dict[str, list[dict[str, Any]]]:
+    """Campos de cada DSO standard, via RSDODSOIOBJ (marca FIELDTYPE = 'KEY' para os
+    campos de chave). Mesma ressalva de nome de tabela das demais funções `_*_fields`."""
+    sql = "SELECT ODSOBJECT, IOBJNM, FIELDTYPE FROM RSDODSOIOBJ WHERE OBJVERS = ?"
+    rows = _run_optional(conn, "RSDODSOIOBJ (campos do DSO)", sql, (_ACTIVE_VERSION,))
+    by_dso: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_dso.setdefault(row["ODSOBJECT"], []).append(
+            {"nome": row["IOBJNM"], "chave": row.get("FIELDTYPE") == "KEY"}
+        )
+    return by_dso
 
 
 def extract_dsos(
@@ -88,7 +166,13 @@ def extract_dsos(
           ON t.ODSOBJECT = d.ODSOBJECT AND t.LANGU = ?
         WHERE d.OBJVERS = ?{pkg_clause}{since_clause}
     """
-    return _run(conn, "DSOs standard", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+    rows = _run(conn, "DSOs standard", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+
+    fields_by_dso = _dso_fields(conn)
+    datatypes = _infoobject_datatypes(conn)
+    for row in rows:
+        row["CAMPOS"] = _enrich_fields_with_datatype(fields_by_dso.get(row["ODSOBJECT"], []), datatypes)
+    return rows
 
 
 def extract_multiproviders(
@@ -113,8 +197,11 @@ def extract_multiproviders(
     for row in parts:
         parts_by_mp.setdefault(row["INFOCUBE"], []).append(row["PARTCUBE"])
 
+    fields_by_provider = _infoprovider_fields(conn)
+    datatypes = _infoobject_datatypes(conn)
     for mp in multiproviders:
         mp["PART_PROVIDERS"] = parts_by_mp.get(mp["INFOCUBE"], [])
+        mp["CAMPOS"] = _enrich_fields_with_datatype(fields_by_provider.get(mp["INFOCUBE"], []), datatypes)
     return multiproviders
 
 

@@ -40,6 +40,40 @@ def _run_optional(conn: SqlConnection, label: str, sql: str, params: tuple[Any, 
         return []
 
 
+def _hana_columns(
+    conn: SqlConnection, hana_schema: str, table_names: list[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Lista real de colunas (nome/tipo/comprimento/obrigatório) de tabelas/views HANA,
+    via `SYS.TABLE_COLUMNS` — a fonte mais confiável de schema para objetos next-gen,
+    já que ADSOs/CompositeProviders/Open ODS Views são fisicamente tabelas/views HANA.
+
+    Enriquecimento opcional: tabela/view ausente do schema informado (ou schema
+    incorreto) apenas resulta em `campos` vazio para aquele objeto, sem interromper
+    a extração dos demais.
+    """
+    if not table_names:
+        return {}
+    placeholders = ", ".join("?" for _ in table_names)
+    sql = f"""
+        SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE_NAME, LENGTH, IS_NULLABLE, POSITION
+        FROM SYS.TABLE_COLUMNS
+        WHERE SCHEMA_NAME = ? AND TABLE_NAME IN ({placeholders})
+        ORDER BY TABLE_NAME, POSITION
+    """
+    rows = _run_optional(conn, "SYS.TABLE_COLUMNS (colunas)", sql, (hana_schema, *table_names))
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_table.setdefault(row["TABLE_NAME"], []).append(
+            {
+                "nome": row["COLUMN_NAME"],
+                "tipo_dado": row.get("DATA_TYPE_NAME"),
+                "comprimento": row.get("LENGTH"),
+                "obrigatorio": row.get("IS_NULLABLE") == "FALSE",
+            }
+        )
+    return by_table
+
+
 def extract_adsos(
     conn: SqlConnection, filters: ExtractionFilters, language: str = "EN"
 ) -> list[dict[str, Any]]:
@@ -53,6 +87,24 @@ def extract_adsos(
         WHERE a.OBJVERS = ?{pkg_clause}{since_clause}
     """
     return _run(conn, "ADSOs", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
+
+
+def enrich_adsos_with_hana_catalog(conn: SqlConnection, adsos: list[dict[str, Any]], hana_schema: str) -> None:
+    """Tenta obter as colunas reais de cada ADSO via catálogo HANA, usando o nome
+    técnico do ADSO como nome da tabela ativa.
+
+    Aviso: este é o enriquecimento menos confiável do grupo — a tabela ativa gerada
+    para um ADSO no HANA nem sempre tem exatamente o mesmo nome do ADSO (pode levar
+    prefixo/sufixo interno dependendo da versão/Support Package). Se não casar, o
+    ADSO simplesmente fica sem `campos` (mesmo padrão tolerante das demais consultas
+    de enriquecimento) — valide o nome real da tabela ativa no sandbox do cliente.
+    """
+    adso_names = [a["ADSONM"] for a in adsos]
+    columns_by_table = _hana_columns(conn, hana_schema, adso_names)
+    for adso in adsos:
+        campos = columns_by_table.get(adso["ADSONM"])
+        if campos:
+            adso["CAMPOS"] = campos
 
 
 def extract_composite_providers(
@@ -106,7 +158,9 @@ def enrich_with_hana_catalog(
     conn: SqlConnection, composite_providers: list[dict[str, Any]], hana_schema: str
 ) -> None:
     """Complementa cada CompositeProvider com a definição técnica final da
-    Calculation View equivalente no catálogo HANA (seção 3.2), quando existir.
+    Calculation View equivalente no catálogo HANA (seção 3.2), quando existir —
+    incluindo agora a lista real de colunas (nome/tipo/comprimento), não só a
+    contagem, em `HANA_VIEW["campos"]`.
 
     Modifica `composite_providers` in place, adicionando a chave `HANA_VIEW`.
     """
@@ -123,22 +177,31 @@ def enrich_with_hana_catalog(
     view_rows = _run_optional(conn, "SYS.VIEWS (catálogo HANA)", views_sql, (hana_schema, *view_names))
     view_by_name = {row["VIEW_NAME"]: row for row in view_rows}
 
-    columns_sql = f"""
-        SELECT TABLE_NAME, COUNT(*) AS NUM_COLUNAS
-        FROM SYS.TABLE_COLUMNS
-        WHERE SCHEMA_NAME = ? AND TABLE_NAME IN ({placeholders})
-        GROUP BY TABLE_NAME
-    """
-    column_rows = _run_optional(conn, "SYS.TABLE_COLUMNS (catálogo HANA)", columns_sql, (hana_schema, *view_names))
-    columns_by_name = {row["TABLE_NAME"]: row["NUM_COLUNAS"] for row in column_rows}
+    columns_by_name = _hana_columns(conn, hana_schema, view_names)
 
     for cp in composite_providers:
         name = cp["COMPPROV"]
-        if name in view_by_name:
+        campos = columns_by_name.get(name, [])
+        if name in view_by_name or campos:
             cp["HANA_VIEW"] = {
-                "view_type": view_by_name[name].get("VIEW_TYPE"),
-                "num_columns": columns_by_name.get(name),
+                "view_type": view_by_name.get(name, {}).get("VIEW_TYPE"),
+                "num_columns": len(campos),
+                "campos": campos,
             }
+
+
+def enrich_open_ods_views_with_hana_catalog(
+    conn: SqlConnection, views: list[dict[str, Any]], hana_schema: str
+) -> None:
+    """Complementa cada Open ODS View com as colunas reais da tabela/view HANA de
+    origem (`SOURCE`), já que uma Open ODS View lê diretamente de um objeto HANA
+    existente — essa é a fonte mais confiável de schema para este tipo."""
+    source_names = [v["SOURCE"] for v in views if v.get("SOURCE")]
+    columns_by_table = _hana_columns(conn, hana_schema, source_names)
+    for view in views:
+        campos = columns_by_table.get(view.get("SOURCE"))
+        if campos:
+            view["CAMPOS"] = campos
 
 
 EXTRACTORS = {
@@ -165,10 +228,21 @@ def extract_all(
             logger.exception("Extração de %s falhou — objeto será reportado como erro", object_type)
             results[object_type] = []
 
-    if hana_schema and "CompositeProvider" in results:
-        try:
-            enrich_with_hana_catalog(conn, results["CompositeProvider"], hana_schema)
-        except Exception:  # noqa: BLE001
-            logger.exception("Falha ao enriquecer CompositeProviders com catálogo HANA")
+    if hana_schema:
+        if "CompositeProvider" in results:
+            try:
+                enrich_with_hana_catalog(conn, results["CompositeProvider"], hana_schema)
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao enriquecer CompositeProviders com catálogo HANA")
+        if "OpenODSView" in results:
+            try:
+                enrich_open_ods_views_with_hana_catalog(conn, results["OpenODSView"], hana_schema)
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao enriquecer Open ODS Views com catálogo HANA")
+        if "ADSO" in results:
+            try:
+                enrich_adsos_with_hana_catalog(conn, results["ADSO"], hana_schema)
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao enriquecer ADSOs com catálogo HANA")
 
     return results

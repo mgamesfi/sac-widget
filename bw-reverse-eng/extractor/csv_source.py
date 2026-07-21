@@ -24,8 +24,11 @@ logger = logging.getLogger("bw_reveng.extractor.csv_source")
 #: (ex: `SYS.VIEWS.csv`).
 KNOWN_TABLES = [
     "RSDIOBJ", "RSDIOBJT",
+    "RSDCHA", "RSDKYF",  # tipo de dado por InfoObject (características/key figures)
     "RSDCUBE", "RSDCUBET",
+    "RSDCUBEIOBJ",  # campos (características + key figures) de InfoCube/MultiProvider
     "RSDODSO", "RSDODSOT",
+    "RSDODSOIOBJ",  # campos de DSO standard
     "RSDMPRO",
     "RSTRAN", "RSTRANSTEPS",
     "RSBKDTP",

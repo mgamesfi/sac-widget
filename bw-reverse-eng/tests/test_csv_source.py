@@ -18,6 +18,18 @@ def _write_csv(path, header, rows, delimiter=","):
     )
 
 
+def test_known_tables_include_field_schema_tables():
+    """Regressão: extractor/classic_layer.py e nextgen_layer.py consultam
+    RSDCHA/RSDKYF/RSDCUBEIOBJ/RSDODSOIOBJ para extrair schema de campos — se um
+    desses nomes for adicionado a uma consulta sem também entrar em KNOWN_TABLES,
+    o CSV correspondente nunca é carregado (mesmo existindo no diretório) e a
+    consulta falha silenciosamente com 'no such table'."""
+    from extractor.csv_source import KNOWN_TABLES
+
+    for table in ("RSDCHA", "RSDKYF", "RSDCUBEIOBJ", "RSDODSOIOBJ"):
+        assert table in KNOWN_TABLES
+
+
 def test_connect_raises_for_missing_directory(tmp_path):
     conn = CsvConnection(tmp_path / "nao_existe")
     with pytest.raises(CsvSourceError):
@@ -44,7 +56,7 @@ def test_execute_runs_real_sql_against_loaded_table(tmp_path):
         rows = classic_layer.extract_infocubes(conn, ExtractionFilters())
 
     assert rows == [
-        {"INFOCUBE": "ZSALES", "CUBETYPE": "0", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Vendas"}
+        {"INFOCUBE": "ZSALES", "CUBETYPE": "0", "DEVCLASS": "ZBW", "TIMESTMP": "20260101", "LASTUSER": "JDOE", "TXTLG": "Vendas", "CAMPOS": []}
     ]
 
 

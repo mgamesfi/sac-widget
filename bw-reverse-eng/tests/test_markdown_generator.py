@@ -42,6 +42,31 @@ def test_render_object_page_includes_description_and_mermaid_block():
     assert "ZDSO1" in page  # fonte listada e linkada
 
 
+def test_render_object_page_shows_campos_table_when_schema_available():
+    dso = _obj(
+        ObjectType.DSO, "ZDSO1",
+        atributos={"campos": [
+            {"nome": "0MATERIAL", "tipo_dado": "CHAR", "comprimento": 18, "chave": True},
+            {"nome": "0AMOUNT", "tipo_dado": "CURR", "comprimento": 15, "chave": False},
+        ]},
+    )
+    graph = build_graph([dso])
+    page = render_object_page(dso, graph, {dso.id: dso})
+
+    assert "## Campos" in page
+    assert "0MATERIAL" in page
+    assert "CHAR" in page
+    assert "sim" in page  # marca a coluna chave do 0MATERIAL
+
+
+def test_render_object_page_omits_campos_section_when_schema_missing():
+    dso = _obj(ObjectType.DSO, "ZDSO1")
+    graph = build_graph([dso])
+    page = render_object_page(dso, graph, {dso.id: dso})
+
+    assert "## Campos" not in page
+
+
 def test_generate_documentation_writes_index_objects_and_reports(tmp_path):
     objects = _sample_objects()
     graph = build_graph(objects)
