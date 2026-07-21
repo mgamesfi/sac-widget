@@ -34,6 +34,18 @@ def _run(conn: SqlConnection, label: str, sql: str, params: tuple[Any, ...]) -> 
         raise
 
 
+def _run_optional(conn: SqlConnection, label: str, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+    """Como `_run`, mas para consultas de enriquecimento (ex: contagem de regras,
+    partes de MultiProvider). Se a tabela não existir ou faltar permissão — comum
+    quando a fonte é um export parcial em CSV —, registra um aviso e segue sem os
+    dados extras em vez de descartar todo o tipo de objeto principal."""
+    try:
+        return conn.execute(sql, params)
+    except Exception:  # noqa: BLE001
+        logger.warning("Enriquecimento opcional indisponível (%s) — seguindo sem esses dados", label, exc_info=True)
+        return []
+
+
 def extract_infoobjects(
     conn: SqlConnection, filters: ExtractionFilters, language: str = "EN"
 ) -> list[dict[str, Any]]:
@@ -96,7 +108,7 @@ def extract_multiproviders(
     multiproviders = _run(conn, "MultiProviders", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
 
     parts_sql = "SELECT INFOCUBE, PARTCUBE FROM RSDMPRO WHERE OBJVERS = ?"
-    parts = _run(conn, "RSDMPRO (partes de MultiProvider)", parts_sql, (_ACTIVE_VERSION,))
+    parts = _run_optional(conn, "RSDMPRO (partes de MultiProvider)", parts_sql, (_ACTIVE_VERSION,))
     parts_by_mp: dict[str, list[str]] = {}
     for row in parts:
         parts_by_mp.setdefault(row["INFOCUBE"], []).append(row["PARTCUBE"])
@@ -119,7 +131,7 @@ def extract_transformations(
     transformations = _run(conn, "Transformações", sql, (_ACTIVE_VERSION,) + pkg_params + since_params)
 
     steps_sql = "SELECT TRANID, COUNT(*) AS NUM_REGRAS FROM RSTRANSTEPS WHERE OBJVERS = ? GROUP BY TRANID"
-    steps = _run(conn, "RSTRANSTEPS (regras)", steps_sql, (_ACTIVE_VERSION,))
+    steps = _run_optional(conn, "RSTRANSTEPS (regras)", steps_sql, (_ACTIVE_VERSION,))
     rule_counts = {row["TRANID"]: row["NUM_REGRAS"] for row in steps}
 
     for tr in transformations:
@@ -149,7 +161,7 @@ def extract_process_chains(conn: SqlConnection, filters: ExtractionFilters) -> l
     chains = _run(conn, "Process Chains", sql, (_ACTIVE_VERSION,) + pkg_params + since_params)
 
     nested_sql = "SELECT CHAIN_ID, CALLED_CHAIN_ID FROM RSPCLOGCHAIN"
-    nested = _run(conn, "RSPCLOGCHAIN (encadeamento)", nested_sql, ())
+    nested = _run_optional(conn, "RSPCLOGCHAIN (encadeamento)", nested_sql, ())
     called_by: dict[str, list[str]] = {}
     for row in nested:
         called_by.setdefault(row["CHAIN_ID"], []).append(row["CALLED_CHAIN_ID"])

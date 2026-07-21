@@ -10,6 +10,7 @@ import typer
 
 from config.settings import load_app_settings, load_hana_settings
 from extractor.connection import HanaConnection
+from extractor.csv_source import CsvConnection
 from extractor.filters import ExtractionFilters
 from extractor.pipeline import run_extraction
 from processor.pipeline import load_processed, run_process
@@ -22,6 +23,22 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+_SOURCE_OPTION = typer.Option(
+    "hana",
+    "--source",
+    help="Fonte dos metadados: 'hana' (conexão SQL ao vivo) ou 'csv' (tabelas exportadas como CSV).",
+)
+_CSV_DIR_OPTION = typer.Option(
+    None,
+    "--csv-dir",
+    help="Diretório com os CSVs das tabelas (obrigatório quando --source csv). Ver extractor/csv_source.py:KNOWN_TABLES.",
+)
+_CSV_DELIMITER_OPTION = typer.Option(
+    None,
+    "--csv-delimiter",
+    help="Delimitador dos CSVs (ex: ',' ou ';'). Se omitido, é detectado automaticamente por arquivo.",
+)
+
 
 def _configure_logging(level: str) -> None:
     logging.basicConfig(
@@ -31,7 +48,7 @@ def _configure_logging(level: str) -> None:
     )
 
 
-def _connection_from_settings() -> HanaConnection:
+def _connection_from_hana_settings() -> HanaConnection:
     hana = load_hana_settings()
     return HanaConnection(
         host=hana.host,
@@ -46,26 +63,46 @@ def _connection_from_settings() -> HanaConnection:
     )
 
 
+def _build_connection(source: str, csv_dir: Path | None, csv_delimiter: str | None):
+    """Resolve a fonte de metadados escolhida (`--source`) numa conexão que implementa
+    `SqlConnection` — `HanaConnection` para uma conexão SQL ao vivo (RF01), ou
+    `CsvConnection` para tabelas já exportadas em arquivo, sem exigir configuração
+    de credenciais HANA nesse segundo caso."""
+    if source == "hana":
+        return _connection_from_hana_settings()
+    if source == "csv":
+        if csv_dir is None:
+            raise typer.BadParameter("--csv-dir é obrigatório quando --source csv")
+        return CsvConnection(csv_dir, delimiter=csv_delimiter)
+    raise typer.BadParameter(f"--source inválido: '{source}' (use 'hana' ou 'csv')")
+
+
 @app.command("test-connection")
-def test_connection() -> None:
-    """Valida conectividade e permissões antes de uma extração completa (RF01)."""
+def test_connection(
+    source: str = _SOURCE_OPTION,
+    csv_dir: Path | None = _CSV_DIR_OPTION,
+    csv_delimiter: str | None = _CSV_DELIMITER_OPTION,
+) -> None:
+    """Valida conectividade/permissões (HANA) ou a presença das tabelas (CSV) antes
+    de uma extração completa (RF01)."""
     app_settings = load_app_settings()
     _configure_logging(app_settings.log_level)
 
-    conn = _connection_from_settings()
+    conn = _build_connection(source, csv_dir, csv_delimiter)
     with conn:
         info = conn.test_connection()
 
-    typer.echo(f"Host: {info['host']}:{info['port']}  Usuário: {info['user']}")
+    host_label = f"{info['host']}:{info['port']}" if info.get("port") else info["host"]
+    typer.echo(f"Fonte: {source}  Host: {host_label}  Usuário: {info['user']}")
     if not info.get("ok"):
-        typer.secho(f"FALHA: {info.get('error', 'permissões insuficientes')}", fg=typer.colors.RED)
+        typer.secho(f"FALHA: {info.get('error', 'permissões insuficientes ou tabelas ausentes')}", fg=typer.colors.RED)
         for label, ok in info.get("permissions", {}).items():
-            typer.echo(f"  - {label}: {'OK' if ok else 'SEM ACESSO'}")
+            typer.echo(f"  - {label}: {'OK' if ok else 'SEM ACESSO/AUSENTE'}")
         raise typer.Exit(code=1)
 
-    typer.secho(f"OK — HANA versão {info['hana_version']}", fg=typer.colors.GREEN)
+    typer.secho(f"OK — {info['hana_version']}", fg=typer.colors.GREEN)
     for label, ok in info.get("permissions", {}).items():
-        typer.echo(f"  - {label}: {'OK' if ok else 'SEM ACESSO'}")
+        typer.echo(f"  - {label}: {'OK' if ok else 'SEM ACESSO/AUSENTE'}")
 
 
 @app.command("extract")
@@ -83,8 +120,17 @@ def extract(
     hana_schema: str | None = typer.Option(
         None, "--hana-schema", help="Schema HANA para enriquecer CompositeProviders com o catálogo"
     ),
+    source: str = _SOURCE_OPTION,
+    csv_dir: Path | None = _CSV_DIR_OPTION,
+    csv_delimiter: str | None = _CSV_DELIMITER_OPTION,
 ) -> None:
-    """Extrai metadados das camadas clássica e next-gen (RF02), roda dentro da VPN do cliente."""
+    """Extrai metadados das camadas clássica e next-gen (RF02).
+
+    Com `--source hana` (padrão), roda dentro da VPN do cliente contra o HANA ao
+    vivo. Com `--source csv --csv-dir DIR`, lê as mesmas tabelas a partir de
+    arquivos CSV exportados previamente (sem precisar de conexão de rede nem das
+    credenciais em `.env`) — útil quando o cliente só consegue fornecer dumps.
+    """
     app_settings = load_app_settings()
     _configure_logging(app_settings.log_level)
 
@@ -95,7 +141,7 @@ def extract(
         changed_since=changed_since,
     )
 
-    conn = _connection_from_settings()
+    conn = _build_connection(source, csv_dir, csv_delimiter)
     with conn:
         snapshot_dir = run_extraction(
             conn, filters, output, app_settings.default_language, hana_schema

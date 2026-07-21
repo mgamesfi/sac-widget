@@ -29,6 +29,17 @@ def _run(conn: SqlConnection, label: str, sql: str, params: tuple[Any, ...]) -> 
         raise
 
 
+def _run_optional(conn: SqlConnection, label: str, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+    """Como `_run`, mas para consultas de enriquecimento (fontes/elementos de
+    CompositeProvider, catálogo HANA). Tabela ausente ou sem permissão não deve
+    descartar o objeto principal — apenas segue sem o enriquecimento."""
+    try:
+        return conn.execute(sql, params)
+    except Exception:  # noqa: BLE001
+        logger.warning("Enriquecimento opcional indisponível (%s) — seguindo sem esses dados", label, exc_info=True)
+        return []
+
+
 def extract_adsos(
     conn: SqlConnection, filters: ExtractionFilters, language: str = "EN"
 ) -> list[dict[str, Any]]:
@@ -59,7 +70,7 @@ def extract_composite_providers(
     providers = _run(conn, "CompositeProviders", sql, (language, _ACTIVE_VERSION) + pkg_params + since_params)
 
     sources_sql = "SELECT COMPPROV, SOURCE, SOURCETYPE FROM RSOHCPRSRC WHERE OBJVERS = ?"
-    sources = _run(conn, "RSOHCPRSRC (fontes)", sources_sql, (_ACTIVE_VERSION,))
+    sources = _run_optional(conn, "RSOHCPRSRC (fontes)", sources_sql, (_ACTIVE_VERSION,))
     sources_by_cp: dict[str, list[dict[str, str]]] = {}
     for row in sources:
         sources_by_cp.setdefault(row["COMPPROV"], []).append(
@@ -67,7 +78,7 @@ def extract_composite_providers(
         )
 
     elements_sql = "SELECT COMPPROV, COUNT(*) AS NUM_ELEMENTS FROM RSOHCPRELEMENT WHERE OBJVERS = ? GROUP BY COMPPROV"
-    elements = _run(conn, "RSOHCPRELEMENT (elementos/joins-unions)", elements_sql, (_ACTIVE_VERSION,))
+    elements = _run_optional(conn, "RSOHCPRELEMENT (elementos/joins-unions)", elements_sql, (_ACTIVE_VERSION,))
     element_counts = {row["COMPPROV"]: row["NUM_ELEMENTS"] for row in elements}
 
     for cp in providers:
@@ -109,7 +120,7 @@ def enrich_with_hana_catalog(
         FROM SYS.VIEWS
         WHERE SCHEMA_NAME = ? AND VIEW_NAME IN ({placeholders})
     """
-    view_rows = _run(conn, "SYS.VIEWS (catálogo HANA)", views_sql, (hana_schema, *view_names))
+    view_rows = _run_optional(conn, "SYS.VIEWS (catálogo HANA)", views_sql, (hana_schema, *view_names))
     view_by_name = {row["VIEW_NAME"]: row for row in view_rows}
 
     columns_sql = f"""
@@ -118,7 +129,7 @@ def enrich_with_hana_catalog(
         WHERE SCHEMA_NAME = ? AND TABLE_NAME IN ({placeholders})
         GROUP BY TABLE_NAME
     """
-    column_rows = _run(conn, "SYS.TABLE_COLUMNS (catálogo HANA)", columns_sql, (hana_schema, *view_names))
+    column_rows = _run_optional(conn, "SYS.TABLE_COLUMNS (catálogo HANA)", columns_sql, (hana_schema, *view_names))
     columns_by_name = {row["TABLE_NAME"]: row["NUM_COLUNAS"] for row in column_rows}
 
     for cp in composite_providers:
