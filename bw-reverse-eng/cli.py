@@ -13,6 +13,7 @@ from extractor.connection import HanaConnection
 from extractor.csv_source import CsvConnection
 from extractor.filters import ExtractionFilters
 from extractor.pipeline import run_extraction
+from processor.medallion import classify_all
 from processor.pipeline import load_processed, run_process
 from processor.reports import complexity_report, missing_docs_report, summary_report
 from processor.graph_builder import find_orphans
@@ -197,6 +198,36 @@ def generate_docs(
     typer.secho(f"Documentação gerada em {output}", fg=typer.colors.GREEN)
 
 
+@app.command("export-datasphere")
+def export_datasphere(
+    input: Path = typer.Option(..., "--input", help="Diretório de saída processada (do comando process)"),
+    output: Path = typer.Option(..., "--output", help="Caminho do arquivo JSON de saída (ex: ./datasphere/scaffold.json)"),
+) -> None:
+    """Gera um scaffold JSON (Bronze/Prata/Ouro) para redesenho no SAP Datasphere.
+
+    ATENÇÃO: isto NÃO é um CSN oficial pronto para importar, e não reproduz o
+    resultado do BW sozinho — falta o schema de campos de cada objeto e a lógica de
+    negócio das regras de transformação (não extraídos por este app). É um rascunho
+    de arquitetura-alvo, classificado por camada, para acelerar o redesenho manual.
+    Ver `exporters/datasphere.py` e `processor/medallion.py` para os detalhes e
+    limitações da heurística de classificação.
+    """
+    from exporters.datasphere import export_scaffold
+
+    app_settings = load_app_settings()
+    _configure_logging(app_settings.log_level)
+
+    objects, graph = load_processed(input)
+    export_scaffold(objects, graph, output)
+
+    typer.secho(f"Scaffold Datasphere gravado em {output}", fg=typer.colors.GREEN)
+    typer.secho(
+        "Lembrete: revise os 'avisos' no JSON antes de importar — schema de campos e "
+        "lógica de transformação precisam ser completados manualmente.",
+        fg=typer.colors.YELLOW,
+    )
+
+
 @app.command("summary")
 def summary(
     input: Path = typer.Option(..., "--input", help="Diretório de saída processada (do comando process)"),
@@ -214,6 +245,7 @@ def summary(
         app_settings.transformation_rule_threshold,
     )
     orphans = find_orphans(graph)
+    medallion_counts = classify_all(objects, graph).counts()
 
     typer.echo(f"Total de objetos: {summ.total}")
     typer.echo("Por tipo:")
@@ -222,6 +254,9 @@ def summary(
     typer.echo("Por camada:")
     for camada, qtd in summ.por_camada.items():
         typer.echo(f"  - {camada}: {qtd}")
+    typer.echo("Camada medalhão (heurística — ver 'export-datasphere --help'):")
+    for layer in ("bronze", "silver", "gold", "pipeline"):
+        typer.echo(f"  - {layer}: {medallion_counts[layer]}")
     typer.echo(f"Sem documentação: {len(missing)}")
     typer.echo(f"Achados de complexidade: {len(complexity)}")
     typer.echo(

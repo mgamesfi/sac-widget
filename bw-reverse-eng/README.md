@@ -81,6 +81,35 @@ lineage), `docs/objects/<id>.md` (uma página por objeto, com diagrama de
 contexto imediato) e `docs/reports.md` (sumário, objetos sem documentação e
 complexidade).
 
+### Scaffold para SAP Datasphere (arquitetura medalhão Bronze/Prata/Ouro)
+
+```bash
+bw-reveng export-datasphere --input ./processed/ --output ./datasphere/scaffold.json
+```
+
+Classifica cada objeto numa camada medalhão — heurística por tipo + posição no
+grafo de lineage (ver `processor/medallion.py`): DSO/ADSO sem fonte observada
+→ Bronze, DSO/ADSO com fonte, InfoObject e Hierarquia → Prata, InfoCube/
+MultiProvider/CompositeProvider/OpenODSView → Ouro, e Transformação/DTP/
+Process Chain → `pipeline` (orquestração, não é uma camada de dado). Gera um
+JSON com entidades nomeadas por convenção (`BRZ_`/`SLV_`/`GLD_`), espaços
+sugeridos (`BW_BRONZE`/`BW_SILVER`/`BW_GOLD`) e os fluxos de transformação
+entre elas.
+
+**Leia isto antes de usar**: o JSON gerado **não é um CSN oficial pronto para
+importar** e **não reproduz o resultado do BW automaticamente**. Faltam duas
+coisas que este app não extrai hoje:
+1. **Schema de campos** de cada objeto (nome/tipo/chave) — por isso todo
+   `csn_stub.elements` sai vazio.
+2. **Lógica de negócio das regras de transformação** (mapeamentos, rotinas,
+   fórmulas) — as regras complexas do BW costumam ficar serializadas e só
+   seriam recuperáveis via RFC/BAPI (`RSTRAN_*`), camada não implementada
+   nesta versão (ver seção 3.3 da especificação e `Fora do escopo` abaixo).
+
+Trate o arquivo gerado como um **rascunho de arquitetura-alvo** para acelerar
+o redesenho manual no Data Builder — o próprio JSON lista essas limitações em
+`avisos` e uma pendência por objeto/fluxo.
+
 ## Testes
 
 ```bash
@@ -111,8 +140,13 @@ nomes de tabela/coluna — valide as queries de `extractor/classic_layer.py` e
 | RF04 Grafo de lineage | `processor/graph_builder.py` |
 | RF05 Documentação + Mermaid | `docgen/markdown_generator.py`, `docgen/mermaid_generator.py` |
 | RF06 Inventário e relatórios | `processor/reports.py` |
+| Scaffold Bronze/Prata/Ouro para Datasphere | `processor/medallion.py`, `exporters/datasphere.py` |
 
 ## Fora do escopo (v1)
 
 Alteração de objetos no BW, extração de dados transacionais, automação de
 deploy de transporte e análise de performance de queries (ver seção 1.2).
+Também fora do escopo: extração de schema de campos por objeto e da lógica de
+negócio das regras de transformação (exigiria camada RFC/BAPI, não
+implementada) — por isso o `export-datasphere` gera um rascunho, não uma
+migração automática pronta para carregar.
