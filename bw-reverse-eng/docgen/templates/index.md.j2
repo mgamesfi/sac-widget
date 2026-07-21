@@ -1,0 +1,32 @@
+# Inventário de Objetos — SAP BW 7.5 on HANA
+
+_Gerado em {{ generated_at }}_
+
+## Resumo
+
+- **Total de objetos**: {{ summary.total }}
+- **Clássico**: {{ summary.por_camada.get("classico", 0) }}
+- **Next-gen**: {{ summary.por_camada.get("next-gen", 0) }}
+
+Ver [relatório completo de inventário e complexidade](reports.md).
+
+## Objetos por camada e tipo
+
+{% for camada, tipos in grouped.items() %}
+### {{ camada }}
+
+{% for tipo, items in tipos.items() %}
+#### {{ tipo }} ({{ items|length }})
+
+{% for label, link in items %}
+- [{{ label }}]({{ link }})
+{% endfor %}
+
+{% endfor %}
+{% endfor %}
+
+## Visão macro de lineage (InfoProviders)
+
+```mermaid
+{{ macro_mermaid }}
+```

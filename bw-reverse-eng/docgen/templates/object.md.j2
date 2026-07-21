@@ -1,0 +1,44 @@
+# {{ obj.nome_tecnico }}
+
+- **Id**: `{{ obj.id }}`
+- **Tipo**: {{ obj.tipo }}
+- **Camada**: {{ obj.camada }}
+- **Pacote**: {{ obj.pacote or "_(sem pacote)_" }}
+- **Descrição**: {{ obj.descricao or "_(sem descrição no BW)_" }}
+
+## Fontes (de onde vêm os dados)
+{% if fontes %}
+{% for label, link in fontes %}
+- {% if link %}[{{ label }}]({{ link }}){% else %}{{ label }} _(externo/não resolvido)_{% endif %}
+{% endfor %}
+{% else %}
+_Nenhuma fonte identificada — possível objeto órfão (sem fonte)._
+{% endif %}
+
+## Destinos (quem consome este objeto)
+{% if destinos %}
+{% for label, link in destinos %}
+- {% if link %}[{{ label }}]({{ link }}){% else %}{{ label }} _(externo/não resolvido)_{% endif %}
+{% endfor %}
+{% else %}
+_Nenhum consumidor identificado — possível objeto órfão (sem consumidor)._
+{% endif %}
+
+{% if obj.atributos_especificos %}
+## Atributos específicos
+
+| Atributo | Valor |
+|---|---|
+{% for key, value in obj.atributos_especificos.items() -%}
+| {{ key }} | {{ value }} |
+{% endfor %}
+{% endif %}
+
+## Diagrama de contexto imediato
+
+```mermaid
+{{ mermaid }}
+```
+
+---
+_Gerado em {{ generated_at }} — [voltar ao índice](../index.md)_

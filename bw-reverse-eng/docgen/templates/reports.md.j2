@@ -1,0 +1,65 @@
+# Relatórios de Inventário e Complexidade
+
+_Gerado em {{ generated_at }}_
+
+## Sumário
+
+### Por tipo
+
+| Tipo | Quantidade |
+|---|---|
+{% for tipo, qtd in summary.por_tipo.items() -%}
+| {{ tipo }} | {{ qtd }} |
+{% endfor %}
+
+### Por pacote
+
+| Pacote | Quantidade |
+|---|---|
+{% for pacote, qtd in summary.por_pacote.items() -%}
+| {{ pacote }} | {{ qtd }} |
+{% endfor %}
+
+### Por camada
+
+| Camada | Quantidade |
+|---|---|
+{% for camada, qtd in summary.por_camada.items() -%}
+| {{ camada }} | {{ qtd }} |
+{% endfor %}
+
+## Objetos sem documentação ({{ missing_docs|length }})
+
+{% if missing_docs %}
+| Id | Tipo | Nome técnico |
+|---|---|---|
+{% for obj in missing_docs -%}
+| `{{ obj.id }}` | {{ obj.tipo }} | {{ obj.nome_tecnico }} |
+{% endfor %}
+{% else %}
+_Todos os objetos possuem descrição preenchida._
+{% endif %}
+
+## Objetos órfãos
+
+### Sem fonte ({{ orphans.sem_fonte|length }})
+{% for node_id in orphans.sem_fonte %}
+- `{{ node_id }}`
+{% endfor %}
+
+### Sem consumidor ({{ orphans.sem_consumidor|length }})
+{% for node_id in orphans.sem_consumidor %}
+- `{{ node_id }}`
+{% endfor %}
+
+## Complexidade
+
+{% if complexity %}
+| Id | Tipo | Métrica | Valor | Limite |
+|---|---|---|---|---|
+{% for f in complexity -%}
+| `{{ f.id }}` | {{ f.tipo }} | {{ f.metric }} | {{ f.value }} | {{ f.threshold }} |
+{% endfor %}
+{% else %}
+_Nenhum objeto excedeu os limiares de complexidade configurados._
+{% endif %}
