@@ -84,3 +84,31 @@ def test_full_pipeline_extract_process_generate_docs(tmp_path, fake_connection_f
     # A fonte direta de InfoCube:ZSALES no grafo é a Transformação (contexto imediato);
     # ZDSO1 só aparece na página da própria Transformação (RF05: drill-down por objeto).
     assert "T1" in object_page
+
+
+def test_full_pipeline_with_rfc_rules_enriches_transformation(tmp_path, fake_connection_factory, fake_rfc_connection_factory):
+    """extract com --with-rfc-rules equivalente: passa uma conexão RFC fake e confere
+    que a lógica de negócio da regra chega ao snapshot e à normalização (ver
+    extractor.transformation_rules / processor.normalizer)."""
+    conn = fake_connection_factory(_script())
+    rfc = fake_rfc_connection_factory(
+        {
+            "Z_BWREVENG_GET_TRFN_RULES": {
+                "ET_RULES": [{"SOURCE_FIELD": "MATNR", "TARGET_FIELD": "0MATERIAL", "RULETYPE": "MOVE"}]
+            }
+        }
+    )
+    filters = ExtractionFilters()
+
+    snapshot_dir = run_extraction(
+        conn, filters, tmp_path / "data", language="EN", hana_schema=None,
+        rfc=rfc, rfc_function_module="Z_BWREVENG_GET_TRFN_RULES",
+    )
+    raw = load_snapshot(snapshot_dir)
+    assert raw["Transformacao"][0]["REGRAS"] == [
+        {"campo_origem": "MATNR", "campo_destino": "0MATERIAL", "tipo_regra": "MOVE", "rotina": None}
+    ]
+
+    process_result = run_process(snapshot_dir, tmp_path / "processed")
+    transformation = next(o for o in process_result.objects if o.id == "Transformacao:T1")
+    assert transformation.atributos_especificos["regras"][0]["campo_origem"] == "MATNR"

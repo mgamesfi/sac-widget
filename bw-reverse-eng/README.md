@@ -107,6 +107,51 @@ cliente. Se divergirem, a extração principal do objeto não é afetada (mesmo
 padrão tolerante usado em todo o app): o objeto é extraído normalmente, só sem
 `campos`.
 
+### Lógica de negócio das regras de transformação (via RFC complementar)
+
+`RSTRANSTEPS` só dá a **contagem** de regras de uma Transformação — a lógica em
+si (mapeamentos campo-a-campo, rotinas ABAP, fórmulas) fica armazenada de forma
+serializada/binária no BW e não é recuperável via SQL puro (seção 3.3 da
+especificação). Para isso, use a conexão RFC complementar:
+
+```bash
+# Testar a conexão RFC (separada da fonte principal --source)
+bw-reveng test-connection --rfc
+
+# Extrair incluindo a lógica de negócio das regras
+bw-reveng extract --output ./data/snapshot_2026-07-21/ --with-rfc-rules
+```
+
+Configure `RFC_*` no `.env` (ver `.env.example`) — só é exigido quando você usa
+`--rfc`/`--with-rfc-rules`; o fluxo principal (SQL/CSV) nunca depende disso.
+
+**Leia isto antes de configurar**:
+1. **Exige o SAP NW RFC SDK** — biblioteca C proprietária baixada do SAP
+   Support Portal (não vai por `pip install pyrfc` sozinho; precisa da SDK
+   instalada no SO). Este app foi implementado e testado com uma conexão RFC
+   fake (injeção de dependência, ver `tests/test_rfc_connection.py`), mas
+   **nunca rodou contra um SAP real** — valide com cuidado.
+2. **Não existe um BAPI padrão universal** para "dump estruturado da lógica de
+   uma transformação". `RFC_RULES_FUNCTION_MODULE` no `.env` é configurável
+   porque, na prática, isso quase sempre exige uma função **Z-customizada**
+   que o time ABAP do cliente precisa implementar e disponibilizar via RFC —
+   confirme com o time do cliente qual função (padrão ou customizada) está
+   disponível, e ajuste o nome dos parâmetros em
+   `extractor/transformation_rules.py` se a função devolver campos com nomes
+   diferentes dos já tratados (`SOURCE_FIELD`/`TARGET_FIELD`/`RULETYPE`/
+   `ROUTINE`, entre variações comuns).
+3. **Fallback sem BAPI estruturado**: com `RFC_FETCH_ROUTINE_SOURCE=true`, cada
+   regra do tipo rotina tem seu código-fonte ABAP lido via `RPY_PROGRAM_READ`
+   (função padrão SAP) — não estrutura a lógica, mas recupera o texto para
+   leitura/auditoria manual.
+
+Quando disponível, a lógica fica em `atributos_especificos.regras` (lista de
+`{campo_origem, campo_destino, tipo_regra, rotina, rotina_fonte}`) de cada
+Transformação, aparece no scaffold Datasphere (`fluxos[*].regras_bw`) e
+substitui a mensagem genérica de pendência por uma nota específica — mas ainda
+assim **precisa ser recriada manualmente** no Datasphere (rotinas ABAP não são
+convertidas automaticamente para SQL/lógica gráfica).
+
 ### Scaffold para SAP Datasphere (arquitetura medalhão Bronze/Prata/Ouro)
 
 ```bash
@@ -123,25 +168,27 @@ sugeridos (`BW_BRONZE`/`BW_SILVER`/`BW_GOLD`) e os fluxos de transformação
 entre elas.
 
 **Leia isto antes de usar**: o JSON gerado **não é um CSN oficial pronto para
-importar** e **não reproduz o resultado do BW automaticamente**, mesmo agora
-que o schema de campos é extraído (seção anterior). Duas ressalvas continuam
-valendo:
+importar** e **não reproduz o resultado do BW automaticamente**, mesmo com
+schema de campos (seção anterior) e regras de transformação via RFC (seção
+anterior) já extraídos. Duas ressalvas continuam valendo:
 1. Os tipos de dado em `csn_stub.elements[*].tipo_dado_origem` estão no
    **vocabulário de origem** (BW/HANA), não nos tipos CDS do Datasphere —
    precisam de mapeamento manual (`avisos` e a `pendencia` de cada entidade
    deixam isso explícito). Quando o schema não foi resolvido para um objeto
    (tabela ausente, ADSO sem correspondência no catálogo HANA etc.),
    `elements` fica vazio e a pendência pede para completar manualmente.
-2. **Lógica de negócio das regras de transformação** (mapeamentos, rotinas,
-   fórmulas) continua fora do escopo — as regras complexas do BW costumam
-   ficar serializadas e só seriam recuperáveis via RFC/BAPI (`RSTRAN_*`),
-   camada não implementada nesta versão (ver seção 3.3 da especificação e
-   `Fora do escopo` abaixo). Cada fluxo em `fluxos` só traz a contagem de
-   regras e origem/destino, não a lógica em si.
+2. **Lógica de negócio das regras de transformação** só aparece em
+   `fluxos[*].regras_bw` se a extração rodou com `--with-rfc-rules` (seção
+   anterior) — sem isso, cada fluxo só traz a contagem de regras
+   (`num_regras_bw`) e origem/destino, não a lógica em si. Mesmo quando
+   presente, a lógica (rotinas ABAP, fórmulas) precisa ser **recriada
+   manualmente** como View/Data Flow no Datasphere — não há conversão
+   automática de ABAP para SQL/lógica gráfica.
 
 Trate o arquivo gerado como um **rascunho de arquitetura-alvo** para acelerar
 o redesenho manual no Data Builder — o próprio JSON lista essas limitações em
-`avisos` e uma pendência por objeto/fluxo.
+`avisos` e uma pendência por objeto/fluxo, ajustada conforme o que foi
+efetivamente extraído em cada execução.
 
 ## Testes
 
@@ -158,29 +205,41 @@ extract → process → generate-docs.
 
 Ver seção 9 da especificação: usuário técnico HANA com `SELECT` em
 `SYS`/`_SYS_BI` e nas tabelas de dicionário BW, liberação de VPN até a porta
-SQL do HANA, confirmação de necessidade de RFC complementar, lista de
-pacotes/namespaces relevantes e versão exata do Support Package (pode afetar
-nomes de tabela/coluna — valide as queries de `extractor/classic_layer.py` e
-`extractor/nextgen_layer.py` num sandbox do cliente antes da extração completa).
+SQL do HANA, lista de pacotes/namespaces relevantes e versão exata do Support
+Package (pode afetar nomes de tabela/coluna — valide as queries de
+`extractor/classic_layer.py` e `extractor/nextgen_layer.py` num sandbox do
+cliente antes da extração completa).
+
+Se for usar `--with-rfc-rules` (lógica de negócio das regras de
+transformação), levante também: usuário CPIC + perfil `S_RS_ADMWB`/
+`S_RS_IOBJ` (ou o que a função RFC escolhida exigir) com autorização de
+execução (`S_RFC`) para a função configurada em `RFC_RULES_FUNCTION_MODULE` e
+para `RPY_PROGRAM_READ` (se usar `RFC_FETCH_ROUTINE_SOURCE`), confirmação de
+qual função RFC está disponível ou se o time ABAP precisa implementar uma
+Z-customizada, e o SAP NW RFC SDK instalado na máquina que vai rodar a
+extração.
 
 ## Mapeamento de requisitos
 
 | Requisito | Onde |
 |---|---|
-| RF01 Conexão e autenticação | `config/settings.py`, `extractor/connection.py` (HANA), `extractor/csv_source.py` (CSV) |
+| RF01 Conexão e autenticação | `config/settings.py`, `extractor/connection.py` (HANA), `extractor/csv_source.py` (CSV), `extractor/rfc_connection.py` (RFC complementar) |
 | RF02 Extração de metadados (+ schema de campos) | `extractor/classic_layer.py`, `extractor/nextgen_layer.py`, `extractor/export.py` |
 | RF03 Modelo unificado | `processor/models.py`, `processor/normalizer.py` |
 | RF04 Grafo de lineage | `processor/graph_builder.py` |
 | RF05 Documentação + Mermaid | `docgen/markdown_generator.py`, `docgen/mermaid_generator.py` |
 | RF06 Inventário e relatórios | `processor/reports.py` |
+| Lógica de negócio das regras (RFC, seção 3.3) | `extractor/rfc_connection.py`, `extractor/transformation_rules.py` |
 | Scaffold Bronze/Prata/Ouro para Datasphere | `processor/medallion.py`, `exporters/datasphere.py` |
 
 ## Fora do escopo (v1)
 
 Alteração de objetos no BW, extração de dados transacionais, automação de
 deploy de transporte e análise de performance de queries (ver seção 1.2).
-Também fora do escopo: a lógica de negócio das regras de transformação
-(exigiria camada RFC/BAPI, não implementada) e a tradução automática dos
-tipos de dado BW/HANA para os tipos CDS do Datasphere — por isso o
-`export-datasphere` gera um rascunho, não uma migração automática pronta para
-carregar, mesmo com o schema de campos já extraído.
+Também fora do escopo: tradução automática dos tipos de dado BW/HANA para os
+tipos CDS do Datasphere, e uma função RFC padrão pronta para extrair regras de
+transformação (o `RFC_RULES_FUNCTION_MODULE` quase sempre precisa ser uma
+função Z-customizada implementada pelo time ABAP do cliente — ver seção
+"Lógica de negócio das regras de transformação"). Por isso o
+`export-datasphere` continua sendo um rascunho, não uma migração automática
+pronta para carregar, mesmo com schema de campos e regras já extraídos.

@@ -5,7 +5,9 @@ pydantic>=2.6
 pydantic-settings>=2.2
 typer>=0.12
 
-# Opcional (ver seção 3.3 da especificação — apenas se RFC complementar for necessário)
+# Opcional (ver seção 3.3 da especificação e extractor/rfc_connection.py — só necessário
+# para `--with-rfc-rules` / `test-connection --rfc`; exige também o SAP NW RFC SDK,
+# baixado à parte do SAP Support Portal, que não vem via pip)
 # pyrfc>=3.0
 
 # Dev/test

@@ -8,11 +8,12 @@ from pathlib import Path
 
 import typer
 
-from config.settings import load_app_settings, load_hana_settings
+from config.settings import load_app_settings, load_hana_settings, load_rfc_settings
 from extractor.connection import HanaConnection
 from extractor.csv_source import CsvConnection
 from extractor.filters import ExtractionFilters
 from extractor.pipeline import run_extraction
+from extractor.rfc_connection import RfcConnection
 from processor.medallion import classify_all
 from processor.pipeline import load_processed, run_process
 from processor.reports import complexity_report, missing_docs_report, summary_report
@@ -78,16 +79,50 @@ def _build_connection(source: str, csv_dir: Path | None, csv_delimiter: str | No
     raise typer.BadParameter(f"--source inválido: '{source}' (use 'hana' ou 'csv')")
 
 
+def _connection_from_rfc_settings() -> RfcConnection:
+    rfc = load_rfc_settings()
+    return RfcConnection(
+        ashost=rfc.ashost,
+        sysnr=rfc.sysnr,
+        client=rfc.client,
+        user=rfc.user,
+        password=rfc.password,
+        lang=rfc.lang,
+        router=rfc.router,
+    )
+
+
 @app.command("test-connection")
 def test_connection(
     source: str = _SOURCE_OPTION,
     csv_dir: Path | None = _CSV_DIR_OPTION,
     csv_delimiter: str | None = _CSV_DELIMITER_OPTION,
+    rfc: bool = typer.Option(
+        False,
+        "--rfc",
+        help=(
+            "Testa a conexão RFC complementar (RFC_* no .env) em vez da fonte principal "
+            "(--source) — usada apenas para extrair regras de transformação com "
+            "--with-rfc-rules. Requer 'pyrfc' + SAP NW RFC SDK instalados."
+        ),
+    ),
 ) -> None:
     """Valida conectividade/permissões (HANA) ou a presença das tabelas (CSV) antes
-    de uma extração completa (RF01)."""
+    de uma extração completa (RF01). Com `--rfc`, testa a conexão RFC complementar
+    (seção 3.3) usada só para regras de transformação, em vez da fonte principal."""
     app_settings = load_app_settings()
     _configure_logging(app_settings.log_level)
+
+    if rfc:
+        rfc_conn = _connection_from_rfc_settings()
+        with rfc_conn:
+            info = rfc_conn.test_connection()
+        typer.echo(f"RFC — Host: {info['host']}  Client: {info['client']}  Usuário: {info['user']}")
+        if not info.get("ok"):
+            typer.secho(f"FALHA: {info.get('error', 'erro desconhecido')}", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        typer.secho("OK — RFC_PING respondeu com sucesso", fg=typer.colors.GREEN)
+        return
 
     conn = _build_connection(source, csv_dir, csv_delimiter)
     with conn:
@@ -124,6 +159,17 @@ def extract(
     source: str = _SOURCE_OPTION,
     csv_dir: Path | None = _CSV_DIR_OPTION,
     csv_delimiter: str | None = _CSV_DELIMITER_OPTION,
+    with_rfc_rules: bool = typer.Option(
+        False,
+        "--with-rfc-rules",
+        help=(
+            "Complementa as Transformações extraídas com a lógica de negócio real das "
+            "regras, via conexão RFC (RFC_* no .env — ver config.settings.RfcSettings). "
+            "Requer 'pyrfc' + SAP NW RFC SDK instalados e uma função RFC (geralmente "
+            "Z-customizada) que devolva as regras; sem isso, as Transformações seguem "
+            "extraídas normalmente, só sem o detalhe de regras."
+        ),
+    ),
 ) -> None:
     """Extrai metadados das camadas clássica e next-gen (RF02).
 
@@ -143,10 +189,26 @@ def extract(
     )
 
     conn = _build_connection(source, csv_dir, csv_delimiter)
-    with conn:
-        snapshot_dir = run_extraction(
-            conn, filters, output, app_settings.default_language, hana_schema
-        )
+
+    if with_rfc_rules:
+        rfc_settings = load_rfc_settings()
+        rfc_conn = _connection_from_rfc_settings()
+        with conn, rfc_conn:
+            snapshot_dir = run_extraction(
+                conn,
+                filters,
+                output,
+                app_settings.default_language,
+                hana_schema,
+                rfc=rfc_conn,
+                rfc_function_module=rfc_settings.rules_function_module,
+                rfc_fetch_routine_source=rfc_settings.fetch_routine_source,
+            )
+    else:
+        with conn:
+            snapshot_dir = run_extraction(
+                conn, filters, output, app_settings.default_language, hana_schema
+            )
 
     typer.secho(f"Snapshot gravado em {snapshot_dir}", fg=typer.colors.GREEN)
 

@@ -30,3 +30,30 @@ class FakeConnection:
 @pytest.fixture
 def fake_connection_factory():
     return FakeConnection
+
+
+class FakeRfcConnection:
+    """Implementa o protocolo `extractor.rfc_connection.RfcCaller` em memória.
+
+    `responses` mapeia nome de função RFC -> resultado (dict) ou uma Exception a
+    ser levantada. Permite testar `extractor.transformation_rules` sem depender
+    de `pyrfc`/SAP NW RFC SDK nem de um sistema SAP real.
+    """
+
+    def __init__(self, responses: dict[str, Any]):
+        self.responses = responses
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call(self, function_name: str, **params: Any) -> dict[str, Any]:
+        self.calls.append((function_name, params))
+        if function_name not in self.responses:
+            raise AssertionError(f"Nenhuma resposta configurada para a função RFC: {function_name}")
+        outcome = self.responses[function_name]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture
+def fake_rfc_connection_factory():
+    return FakeRfcConnection

@@ -64,6 +64,40 @@ def test_build_scaffold_flow_carries_rule_count_and_resolved_endpoints():
     assert flow["para"] == ["GLD_ZSALES"]
 
 
+def test_build_scaffold_flow_uses_rfc_extracted_rules_when_present():
+    dso = _obj(ObjectType.DSO, "ZDSO1")
+    transf = _obj(
+        ObjectType.TRANSFORMACAO, "T1",
+        fontes=["DSO:ZDSO1"], destinos=["InfoCube:ZSALES"],
+        atributos={
+            "num_regras": 1,
+            "regras": [{"campo_origem": "MATNR", "campo_destino": "0MATERIAL", "tipo_regra": "MOVE", "rotina": None}],
+        },
+    )
+    cube = _obj(ObjectType.INFO_CUBE, "ZSALES")
+    graph = build_graph([dso, transf, cube])
+    scaffold = build_scaffold([dso, transf, cube], graph)
+
+    flow = scaffold["fluxos"][0]
+    assert flow["regras_bw"] == [
+        {"campo_origem": "MATNR", "campo_destino": "0MATERIAL", "tipo_regra": "MOVE", "rotina": None}
+    ]
+    assert "extraída via RFC" in flow["pendencias"][0]
+
+
+def test_global_warnings_reflect_rule_extraction_coverage():
+    dso = _obj(ObjectType.DSO, "ZDSO1")
+    with_rules = _obj(
+        ObjectType.TRANSFORMACAO, "T1", fontes=["DSO:ZDSO1"],
+        atributos={"regras": [{"campo_origem": "A", "campo_destino": "B", "tipo_regra": "MOVE", "rotina": None}]},
+    )
+    graph = build_graph([dso, with_rules])
+    scaffold = build_scaffold([dso, with_rules], graph)
+
+    warnings_text = " ".join(scaffold["avisos"])
+    assert "extraída via RFC para todos os fluxos" in warnings_text
+
+
 def test_build_scaffold_entities_have_empty_elements_and_pendencia():
     objects = _sample_objects()
     graph = build_graph(objects)

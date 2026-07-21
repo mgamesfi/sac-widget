@@ -205,6 +205,10 @@ def _normalize_transformations(rows: list[dict[str, Any]]) -> list[UnifiedObject
                 "source_type": r.get("SOURCETYPE"),
                 "target_type": r.get("TARGETTYPE"),
                 "timestmp": r.get("TIMESTMP"),
+                # Lógica de negócio das regras, só presente se a extração rodou com
+                # --with-rfc-rules (ver extractor.transformation_rules) — do
+                # contrário, fica ausente e só o num_regras (contagem via SQL) existe.
+                "regras": r.get("REGRAS", []),
             },
         )
         if r.get("SOURCE"):

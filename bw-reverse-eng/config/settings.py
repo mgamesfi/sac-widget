@@ -41,6 +41,48 @@ class HanaSettings(BaseSettings):
         return self
 
 
+class RfcSettings(BaseSettings):
+    """Parâmetros de conexão RFC complementar (seção 3.3), usada apenas para
+    extrair a lógica de negócio das regras de transformação (ver
+    `extractor.rfc_connection` e `extractor.transformation_rules`).
+
+    Só é carregada quando o usuário pede explicitamente (`--with-rfc-rules` ou
+    `test-connection --rfc`) — nunca é exigida para o fluxo principal (SQL/CSV).
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="RFC_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    ashost: str = Field(..., description="Application server SAP, alcançável via VPN")
+    sysnr: str = Field("00", description="Número do sistema SAP")
+    client: str = Field(..., description="Mandante (client) SAP")
+    user: str = Field(..., description="Usuário CPIC/RFC técnico")
+    password: str = Field(..., description="Senha do usuário técnico")
+    lang: str = Field("EN", description="Idioma do logon RFC")
+    router: str | None = Field(None, description="String de SAP Router, se necessário via VPN")
+    rules_function_module: str = Field(
+        "Z_BWREVENG_GET_TRFN_RULES",
+        description=(
+            "Função RFC-enabled que devolve as regras de uma transformação em formato "
+            "tabular. Não há um BAPI padrão universal para isso — normalmente é uma "
+            "função Z-customizada que o time ABAP do cliente precisa implementar. "
+            "Ajuste este nome (e os parâmetros em transformation_rules.py, se preciso) "
+            "conforme o que o time do cliente disponibilizar."
+        ),
+    )
+    fetch_routine_source: bool = Field(
+        False,
+        description=(
+            "Se true, também tenta ler o código-fonte ABAP de cada rotina referenciada "
+            "via RPY_PROGRAM_READ (fallback quando não há função estruturada disponível)."
+        ),
+    )
+
+
 class AppSettings(BaseSettings):
     """Configurações gerais da aplicação (extração, filtros, saída)."""
 
@@ -64,6 +106,10 @@ class AppSettings(BaseSettings):
 
 def load_hana_settings() -> HanaSettings:
     return HanaSettings()
+
+
+def load_rfc_settings() -> RfcSettings:
+    return RfcSettings()
 
 
 def load_app_settings() -> AppSettings:

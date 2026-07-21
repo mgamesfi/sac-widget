@@ -67,3 +67,22 @@ def test_normalize_unknown_object_type_is_reported_and_skipped():
     result = normalize({"TipoInexistente": [{"foo": "bar"}]})
     assert result.objects == []
     assert any("TipoInexistente" in w for w in result.warnings)
+
+
+def test_normalize_maps_rfc_extracted_rules_into_atributos():
+    raw = _raw_snapshot()
+    raw["Transformacao"][0]["REGRAS"] = [
+        {"campo_origem": "MATNR", "campo_destino": "0MATERIAL", "tipo_regra": "MOVE", "rotina": None}
+    ]
+    result = normalize(raw)
+    transformation = next(o for o in result.objects if o.tipo == ObjectType.TRANSFORMACAO)
+    assert transformation.atributos_especificos["regras"] == [
+        {"campo_origem": "MATNR", "campo_destino": "0MATERIAL", "tipo_regra": "MOVE", "rotina": None}
+    ]
+
+
+def test_normalize_transformation_without_rfc_rules_has_empty_regras():
+    result = normalize(_raw_snapshot())
+    transformation = next(o for o in result.objects if o.tipo == ObjectType.TRANSFORMACAO)
+    assert transformation.atributos_especificos["regras"] == []
+    assert transformation.atributos_especificos["num_regras"] == 5  # contagem via SQL preservada

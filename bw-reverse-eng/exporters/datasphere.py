@@ -126,27 +126,43 @@ def _entity_entry(
 
 def _flow_entry(obj: UnifiedObject, name_by_id: dict[str, str]) -> dict[str, Any]:
     num_regras = obj.atributos_especificos.get("num_regras")
+    regras = obj.atributos_especificos.get("regras") or []
     entry: dict[str, Any] = {
         "id": obj.id,
         "tipo_origem_bw": _PIPELINE_TYPE_LABELS.get(obj.tipo, obj.tipo.value),
         "nome_tecnico_bw": obj.nome_tecnico,
         "de": [name_by_id.get(f, f) for f in obj.fontes],
         "para": [name_by_id.get(d, d) for d in obj.destinos],
-        "pendencias": [
-            "Lógica de negócio das regras de transformação não foi extraída (requer camada RFC/BAPI, "
-            "não implementada nesta versão) — recrie manualmente como View/Data Flow no Datasphere."
-        ],
     }
     if num_regras is not None:
         entry["num_regras_bw"] = num_regras
+
+    if regras:
+        entry["regras_bw"] = regras
+        entry["pendencias"] = [
+            "Lógica de negócio extraída via RFC (ver 'regras_bw') — ainda assim precisa ser recriada "
+            "manualmente como View/Data Flow no Datasphere; rotinas ABAP em 'rotina_fonte' (quando "
+            "presentes) não são convertidas automaticamente para SQL/lógica gráfica do Datasphere."
+        ]
+    else:
+        entry["pendencias"] = [
+            "Lógica de negócio das regras de transformação não foi extraída (rode a extração com "
+            "--with-rfc-rules, se disponível, ou complete manualmente) — recrie como View/Data Flow "
+            "no Datasphere."
+        ]
     return entry
 
 
 def _global_warnings(
-    classification: MedallionClassification, objects: list[UnifiedObject], entidades: list[dict[str, Any]]
+    classification: MedallionClassification,
+    objects: list[UnifiedObject],
+    entidades: list[dict[str, Any]],
+    fluxos: list[dict[str, Any]],
 ) -> list[str]:
     total = len(entidades)
     with_schema = sum(1 for e in entidades if e["csn_stub"]["elements"])
+    total_flows = len(fluxos)
+    with_rules = sum(1 for f in fluxos if f.get("regras_bw"))
 
     if total == 0:
         schema_warning = "Nenhuma entidade classificada — não há schema de campos a reportar."
@@ -170,15 +186,36 @@ def _global_warnings(
             "manualmente antes de importar."
         )
 
+    if total_flows == 0:
+        rules_warning = "Nenhum fluxo (Transformação/DTP/Process Chain) classificado."
+    elif with_rules == 0:
+        rules_warning = (
+            "Lógica de negócio das regras de transformação não foi extraída para nenhum fluxo — rode "
+            "a extração com --with-rfc-rules (requer conexão RFC configurada e uma função RFC que "
+            "devolva as regras; ver config.settings.RfcSettings) ou complete manualmente cada item em "
+            "'fluxos' antes de recriar a lógica no Datasphere."
+        )
+    elif with_rules == total_flows:
+        rules_warning = (
+            "Lógica de negócio extraída via RFC para todos os fluxos ('regras_bw') — ainda assim "
+            "precisa ser recriada manualmente como View/Data Flow no Datasphere; não há tradução "
+            "automática de rotinas ABAP para SQL/lógica gráfica."
+        )
+    else:
+        rules_warning = (
+            f"Lógica de negócio extraída via RFC para {with_rules} de {total_flows} fluxos — os demais "
+            "só têm a contagem de regras ('num_regras_bw'), sem detalhe; complete manualmente antes de "
+            "recriar no Datasphere."
+        )
+
     warnings = [
         "Classificação Bronze/Prata/Ouro é heurística (tipo de objeto + posição no grafo de lineage "
         "observado) — valide com o time de negócio antes de tratar como arquitetura final.",
         schema_warning,
-        "A lógica de negócio das regras de transformação não foi extraída — reveja cada item em "
-        "'fluxos' e recrie a lógica manualmente no Datasphere.",
+        rules_warning,
         "Este arquivo é um rascunho de arquitetura-alvo, não um CSN oficial pronto para carregar — "
         "não é garantido que produza o mesmo resultado do BW sem revisão manual, mesmo quando o "
-        "schema de campos está preenchido.",
+        "schema de campos e as regras de transformação estão preenchidos.",
     ]
     counts = classification.counts()
     if counts["bronze"] == 0:
@@ -218,7 +255,7 @@ def build_scaffold(objects: list[UnifiedObject], graph: nx.DiGraph) -> dict[str,
         "espacos_sugeridos": {k.value: v for k, v in _SUGGESTED_SPACES.items()},
         "entidades": sorted(entidades, key=lambda e: (e["camada_medalhao"], e["nome_tecnico_bw"])),
         "fluxos": sorted(fluxos, key=lambda f: f["nome_tecnico_bw"]),
-        "avisos": _global_warnings(classification, objects, entidades),
+        "avisos": _global_warnings(classification, objects, entidades, fluxos),
     }
 
 
